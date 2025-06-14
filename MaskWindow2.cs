@@ -59,7 +59,7 @@ namespace small_window2
         private readonly IntPtr _hdcMem;       // 内存 DC (SelectObject 到 _bmpPreview)
         private readonly IntPtr _hBmp;         // GDI 句柄，选进 _hdcMem
 
-        private readonly Brush _brushDim = new SolidBrush(Color.FromArgb(ALPHA_DIM, Color.Black));
+        private readonly Brush _brushDim = new SolidBrush(Color.FromArgb(80, Color.Black));
         private readonly Pen _penBlue = new Pen(Color.CornflowerBlue, PREVIEW_BORDER);
 
 
@@ -73,7 +73,7 @@ namespace small_window2
         }
 
 
-        private const byte ALPHA_DIM = 80;           // 遮罩透明度  
+        private byte _alphadim = 80;           // 遮罩透明度  
                                                      // MaskWindow ctor 里：先不给 WS_EX_TRANSPARENT
         const int WS_EX_MASK = WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW;
 
@@ -83,13 +83,6 @@ namespace small_window2
 
         public MaskWindow(RoiBorderWindow? border, Rectangle? initialRoi = null)
         {
-
-            //_previewTimer.Tick += (_, __) =>
-            //{
-            //    if (!_previewDirty) return;
-            //    _previewDirty = false;
-            //    UpdateLayered_Preview();      // 太卡了；
-            //};
             _previewTimer.Start();
 
             //初始化 Preview GDI 缓存
@@ -138,7 +131,7 @@ namespace small_window2
             _roiPreview = Rectangle.Empty;          // 无洞
             using var bmp = new Bitmap(_screen.Width, _screen.Height, PixelFormat.Format32bppArgb);
             using var g = Graphics.FromImage(bmp);
-            g.Clear(Color.FromArgb(ALPHA_DIM, Color.Black));
+            g.Clear(Color.FromArgb(_alphadim, Color.Black));
             PushBitmap(bmp);                        // 复用你的位图推送逻辑
         }
         /// <summary>被 RoiBorderWindow 调用，更新 ROI 并重绘遮罩。</summary>  
@@ -498,38 +491,7 @@ namespace small_window2
         // ---- 类字段区，再加一个句柄保存“当前帧的位图” ----
         private IntPtr _hBmpCurrent = IntPtr.Zero;
 
-        private void UpdateLayered_Preview()
-        {
-            int w = _screen.Width, h = _screen.Height;
 
-            /* ---------- 用 _gfxPreview 画半透明黑 + 挖洞 + 蓝框 ---------- */
-            Rectangle roi = NormalizeAndClamp(_roiPreview, w, h);
-            DrawPreviewToCachedBitmap(roi, w, h);
-
-            /* ---------- 生成新的 HBITMAP 并选进 DC ---------- */
-            IntPtr hBmpNew = _bmpPreview.GetHbitmap(Color.FromArgb(0));
-            IntPtr hOld = MyWin32.SelectObject(_hdcMem, hBmpNew);  // ← hOld = 上一帧
-
-            /* ---------- 推送到分层窗口 ---------- */
-            var size = new MyWin32.SIZE(w, h);
-            var srcPt = new MyWin32.POINT(0, 0);
-            var topPt = new MyWin32.POINT(0, 0);
-            var blend = new MyWin32.BLENDFUNCTION
-            {
-                BlendOp = MyWin32.AC_SRC_OVER,
-                SourceConstantAlpha = 255,
-                AlphaFormat = MyWin32.AC_SRC_ALPHA
-            };
-            MyWin32.UpdateLayeredWindow(
-                Handle, _hdcScreen, ref topPt, ref size,
-                _hdcMem, ref srcPt, 0, ref blend, MyWin32.ULW_ALPHA);
-
-            /* ---------- 现在可以安全删上一帧位图 ---------- */
-            if (_hBmpCurrent != IntPtr.Zero)
-                MyWin32.DeleteObject(_hBmpCurrent);   // 上一帧已被替换、未选入 DC
-
-            _hBmpCurrent = hBmpNew;                   // 本帧变成“上一帧”
-        }
         #region 绘制  
         /// <summary>
         /// 把拖拽中得到的 ROI 规范化，并裁剪到屏幕内：
@@ -558,19 +520,6 @@ namespace small_window2
 
             return Rectangle.FromLTRB(L, T, R, B);
         }
-        /// <summary>
-        /// 把当前 roi 绘制到复用位图 _bmpPreview 上：
-        ///   1) 整屏半透明黑   2) 在 roi 挖洞   3) 画蓝框
-        /// </summary>
-        private void DrawPreviewToCachedBitmap(Rectangle roi, int w, int h)
-        {
-            _gfxPreview.CompositingMode = CompositingMode.SourceCopy;
-            _gfxPreview.FillRectangle(_brushDim, 0, 0, w, h);
-            _gfxPreview.FillRectangle(Brushes.Transparent, roi);
-
-            _gfxPreview.CompositingMode = CompositingMode.SourceOver;
-            _gfxPreview.DrawRectangle(_penBlue, roi);
-        }
 
         private void UpdateLayered()
         {
@@ -581,7 +530,7 @@ namespace small_window2
             g.Clear(Color.Transparent);
             g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
 
-            using var dimBrush = new SolidBrush(Color.FromArgb(ALPHA_DIM, Color.Black));
+            using var dimBrush = new SolidBrush(Color.FromArgb(_alphadim, Color.Black));
             g.FillRectangle(dimBrush, _screen);               // 整屏半透明黑  
 
             g.FillRectangle(Brushes.Transparent, _roi);       // 在 ROI 位置挖洞  
@@ -615,7 +564,14 @@ namespace small_window2
             ReleaseDC(IntPtr.Zero, hScreen);
         }
         #endregion
-
+        /// <summary>调整半透明黑的 Alpha 并重绘遮罩。</summary>
+        public void ChangeDim(int delta)
+        {
+            // delta 由滚轮传来：120 一格，正→变亮(减暗)，负→更暗
+            int v = _alphadim - delta / 24;          // 120/24=5 每格改 5
+            _alphadim = (byte)Math.Clamp(v, 30, 200); // 30~200 之间
+            UpdateLayered();                          // 重新推遮罩位图
+        }
         public void Dispose()
         {
 

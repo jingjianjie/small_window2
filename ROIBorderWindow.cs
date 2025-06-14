@@ -1,13 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
-using System.Diagnostics;
-using System.Linq;
-using System.Net.Http;
+﻿
 using System.Runtime.InteropServices;
-using System.Text;
-using System.Threading.Tasks;
-using System.Windows.Forms;
+
 
 using static small_window2.MyWin32;
 
@@ -68,7 +61,6 @@ namespace small_window2
 
         public RoiBorderWindow(out MaskWindow mask)
         {
-    
             _roi = new Rectangle(
                (Screen.PrimaryScreen!.Bounds.Width - 800) / 2,
                (Screen.PrimaryScreen.Bounds.Height - 400) / 2,
@@ -161,18 +153,6 @@ namespace small_window2
 
                 case (WindowMessage)WM_NCLBUTTONDOWN:
                     {
-                        // ——— 三击检测 ———
-                        //long now = Environment.TickCount64;
-                        //uint dbl = MyWin32.GetDoubleClickTime();   // 系统双击时间(ms)
-                        //_clickCount = (now - _lastClick <= dbl) ? _clickCount + 1 : 1;
-                        //_lastClick = now;
-
-                        //if (_clickCount >= 3)
-                        //{
-                        //    Dispose();                 // 统一关闭(→ 也关遮罩)
-                        //    return;
-                        //}
-
 
                         _htActive = (int)m.WParam;                 // 记录方向
                         _roiStart = _roi;                          // 记录起始矩形
@@ -181,6 +161,16 @@ namespace small_window2
                         return;                                    // 不给系统
                     }
 
+                case (WindowMessage)MyWin32.WM_MOUSEWHEEL:
+                    {
+
+                        int delta = MyWin32.GET_WHEEL_DELTA(m.WParam);
+                        // 把指令传给遮罩，让其调透明度
+                        _mask.ChangeDim(delta);
+
+                        m.Result = IntPtr.Zero;      // 标示已处理
+                        return;
+                    }
 
                 case WindowMessage.WM_MOUSEMOVE:
                     {

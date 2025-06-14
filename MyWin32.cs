@@ -1,10 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+﻿
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Text;
-using System.Threading.Tasks;
+
 
 
 
@@ -63,6 +60,12 @@ namespace small_window2
             MyWin32.GetCursorPos(out var p); return new Point(p.X, p.Y);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static int GET_WHEEL_DELTA(IntPtr wParam)
+        {
+            // 取 wParam 的高 16 位再强转成有符号 short
+            return (short)((wParam.ToInt64() >> 16) & 0xFFFF);
+        }
 
         // ★★ 在常量区追加 ↓ ★★
         internal const int WS_SIZEBOX = 0x00040000;   // == WS_THICKFRAME
@@ -71,6 +74,9 @@ namespace small_window2
 
         internal const int WM_ENTERSIZEMOVE = 0x0231;
         internal const int WM_EXITSIZEMOVE = 0x0232;
+
+        internal const int WM_MOUSEWHEEL = 0x020A;
+        internal static int GET_WHEEL_DELTA(int wp) => (short)(wp >> 16);
 
         // ★★ 追加 GetWindowRect 与 RECT ★★
         [StructLayout(LayoutKind.Sequential)]
