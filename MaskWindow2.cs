@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Linq;
@@ -28,9 +30,15 @@ namespace small_window2
         private enum InitState { InitDraw, Preview, Active }
         private InitState _state = InitState.InitDraw;
 
-        // 用于绘制 / 擦除可逆框
+        private readonly System.Windows.Forms.Timer _previewTimer = new() { Interval = 16 }; // 60 FPS
+        private bool _previewDirty; //预览时蓝框的“脏标”，ticker触发
+
         private Rectangle _rubberLast = Rectangle.Empty;
         private bool _rubberVisible;
+
+        // 用于绘制 / 擦除可逆框
+        //private Rectangle _rubberLast = Rectangle.Empty;
+        //private bool _rubberVisible;
 
         private Point _ptStart;       // InitDraw 拖拽起点
         private Rectangle _roiPreview;    // Preview 模式下临时 ROI
@@ -41,19 +49,19 @@ namespace small_window2
         private Rectangle _roiStartPreview;              // 拖动起点 ROI
         private Point _ptStartPreview;               // 拖动起点鼠标
         private static readonly int PREVIEW_RESIZE_MARGIN = (int)(40 * GetDpiX()); // 判定“拖边/拖角”的宽度  
-        /// <summary>在屏幕上异或方式绘制或擦除一个可逆矩形。</summary>
-        /// 
-        private static void DrawRubber(Rectangle rc)
-        {
-            if (rc.IsEmpty) return;
-            // 必须确保宽高 ≥ 1，否则 API 不画
-            if (rc.Width == 0) rc.Width = 1;
-            if (rc.Height == 0) rc.Height = 1;
 
-            // Screen 坐标 → 直接取屏幕 DC
-            using var g = Graphics.FromHwnd(IntPtr.Zero);
-            ControlPaint.DrawReversibleFrame(rc, Color.CornflowerBlue, FrameStyle.Dashed);
-        }
+
+
+        // === 一次性缓存 === 
+        private readonly Bitmap _bmpPreview;   // 全屏 32-bpp 位图
+        private readonly Graphics _gfxPreview;   // 绑定到 _bmpPreview
+        private readonly IntPtr _hdcScreen;    // 屏幕 DC
+        private readonly IntPtr _hdcMem;       // 内存 DC (SelectObject 到 _bmpPreview)
+        private readonly IntPtr _hBmp;         // GDI 句柄，选进 _hdcMem
+
+        private readonly Brush _brushDim = new SolidBrush(Color.FromArgb(ALPHA_DIM, Color.Black));
+        private readonly Pen _penBlue = new Pen(Color.CornflowerBlue, PREVIEW_BORDER);
+
 
         // Add the following helper method to retrieve the DPI value:
         private static double GetDpiX()
@@ -75,6 +83,28 @@ namespace small_window2
 
         public MaskWindow(RoiBorderWindow? border, Rectangle? initialRoi = null)
         {
+
+            //_previewTimer.Tick += (_, __) =>
+            //{
+            //    if (!_previewDirty) return;
+            //    _previewDirty = false;
+            //    UpdateLayered_Preview();      // 太卡了；
+            //};
+            _previewTimer.Start();
+
+            //初始化 Preview GDI 缓存
+            _screen = Screen.PrimaryScreen!.Bounds;
+
+            _bmpPreview = new Bitmap(_screen.Width, _screen.Height, PixelFormat.Format32bppArgb);
+            _gfxPreview = Graphics.FromImage(_bmpPreview);
+
+            _hdcScreen = MyWin32.GetDC(IntPtr.Zero);
+            _hdcMem = MyWin32.CreateCompatibleDC(_hdcScreen);
+            _hBmp = _bmpPreview.GetHbitmap(Color.FromArgb(0));   // α0=全透明
+            MyWin32.SelectObject(_hdcMem, _hBmp);
+            //
+
+
             var s = GetDpiX();
             _borderWindow = border;                     // ★★
             _screen = Screen.PrimaryScreen!.Bounds;     // ★★
@@ -95,6 +125,11 @@ namespace small_window2
             // 设置窗口样式
             AssignHandle(hWnd);
             UpdateLayered_FullDark();     // 只画全屏暗色（函数见下）
+
+            //注册退出键
+            if (!MyWin32.RegisterHotKey(Handle, MyWin32.HOTKEY_ID_ESC,
+                            MyWin32.MOD_NONE, MyWin32.VK_ESCAPE))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
         }
 
         public void Show() => ShowWindow(Handle, SW_SHOWNOACTIVATE);
@@ -143,7 +178,7 @@ namespace small_window2
             ReleaseDC(IntPtr.Zero, hScreen);
         }
         // ★★ 工具：根据当前屏幕生成居中的初始 ROI
-
+        const int DRAG_THRESHOLD = 3;
         protected override void WndProc(ref Message m)
         {
             Point cur;
@@ -168,20 +203,33 @@ namespace small_window2
 
                 // ───── 1) InitDraw：拖出 ROI ─────
                 case WindowMessage.WM_LBUTTONDOWN when _state == InitState.InitDraw:
-                    _ptStart = MyWin32.LParamToScreen(Handle, (WindowMessage)m.Msg, m.LParam);
-                    MyWin32.SetCapture(Handle);
-                    return;
+                    {
+                        _ptStart = MyWin32.LParamToScreen(Handle, (WindowMessage)m.Msg, m.LParam);
+
+                        MyWin32.SetCapture(Handle);
+                        return;
+                    }
 
                 case WindowMessage.WM_MOUSEMOVE when _state == InitState.InitDraw &&
-                                   MyWin32.GetCapture() == Handle:
-                    cur = MyWin32.LParamToScreen(Handle, (WindowMessage)m.Msg, m.LParam);
-                    _roiPreview = Rectangle.FromLTRB(
-                        Math.Min(_ptStart.X, cur.X),
-                        Math.Min(_ptStart.Y, cur.Y),
-                        Math.Max(_ptStart.X, cur.X),
-                        Math.Max(_ptStart.Y, cur.Y));
-                    UpdateLayered_Preview();
-                    return;
+                                     MyWin32.GetCapture() == Handle:
+                    {
+                        cur = MyWin32.LParamToScreen(Handle, (WindowMessage)m.Msg, m.LParam);
+
+                        // 抹掉旧框
+                        if (_rubberVisible) { DrawRubber(_rubberLast); _rubberVisible = false; }
+
+                        _roiPreview = Rectangle.FromLTRB(
+                            Math.Min(_ptStart.X, cur.X),
+                            Math.Min(_ptStart.Y, cur.Y),
+                            Math.Max(_ptStart.X, cur.X),
+                            Math.Max(_ptStart.Y, cur.Y));
+
+                        // 画新框
+                        _rubberLast = _roiPreview;
+                        DrawRubber(_rubberLast);
+                        _rubberVisible = true;
+                        return;
+                    }
 
 
                 // ───── 2) Preview 模式：ROI 内拖动移动 ─────
@@ -192,10 +240,8 @@ namespace small_window2
                         cur = MyWin32.LParamToScreen(Handle,
                                                           (WindowMessage)m.Msg, m.LParam);
 
-
-                        // --- 1) 先擦掉上一根框 ---
+                        // 擦旧
                         if (_rubberVisible) { DrawRubber(_rubberLast); _rubberVisible = false; }
-
 
 
                         int dx = cur.X - _ptStartPreview.X;
@@ -239,7 +285,9 @@ namespace small_window2
 
                         _roiPreview = Rectangle.FromLTRB(L, T, R, B);
 
-                        // --- 3) 画新框并记录 ---
+
+
+                        // 画新
                         _rubberLast = _roiPreview;
                         DrawRubber(_rubberLast);
                         _rubberVisible = true;
@@ -248,23 +296,26 @@ namespace small_window2
 
                 /* ★★ 重新加入：InitDraw 松键 → 进入 Preview ★★ */
                 case WindowMessage.WM_LBUTTONUP when _state == InitState.InitDraw &&
-                                                  MyWin32.GetCapture() == Handle:
+                    MyWin32.GetCapture() == Handle:
                     {
                         MyWin32.ReleaseCapture();
+                        _previewHT = MyWin32.HTNOWHERE;
 
-                        if (_roiPreview.Width >= 50 && _roiPreview.Height >= 50)
-                        {
-                            _state = InitState.Preview;
+                        // 擦掉最后一根蓝框
+                        if (_rubberVisible) { DrawRubber(_rubberLast); _rubberVisible = false; }
 
-                            // 记录起点，供 Preview 拖动/缩放用
-                            _ptStartPreview = cur = MyWin32.LParamToScreen(Handle, (WindowMessage)m.Msg, m.LParam);
-                            _roiStartPreview = _roiPreview;
-                            _previewHT = MyWin32.HTCAPTION;   // 默认整体拖动
+                        // 真正重绘半透明黑 + 透明洞
+                        // 以前这里调用 UpdateLayered()，但它只画全屏暗 ➜ 改掉
+                        _state = InitState.Preview;
+                        _ptStartPreview = _ptStart;
+                        _roiStartPreview = _roiPreview;
+                        _previewHT = MyWin32.HTCAPTION;
 
-                            UpdateLayered_Preview();   // 最后再画一次蓝框
-                        }
+                        // (2) 真正绘制遮罩   蓝框
+                        RenderMaskWithRoi();
                         return;
                     }
+
 
                 /* ───── 2) Preview —— 唯一的 WM_LBUTTONUP 分支 ───── */
                 case WindowMessage.WM_LBUTTONUP when _state == InitState.Preview &&
@@ -273,8 +324,8 @@ namespace small_window2
                         MyWin32.ReleaseCapture();
                         _previewHT = MyWin32.HTNOWHERE;
 
-                        if (_rubberVisible) { DrawRubber(_rubberLast); _rubberVisible = false; }
-                        UpdateLayered_Preview();       // 真正渲染
+
+                        RenderMaskWithRoi();
                         return;
                     }
 
@@ -285,7 +336,7 @@ namespace small_window2
                         _ptStartPreview = MyWin32.LParamToScreen(Handle, (WindowMessage)m.Msg, m.LParam);
                         _roiStartPreview = _roiPreview;
                         _previewHT = PreviewHitTest(_ptStartPreview);
-                        _rubberVisible = false;
+    
                         MyWin32.SetCapture(Handle);
                         return;
                     }
@@ -333,10 +384,56 @@ namespace small_window2
                         _borderWindow?.NotifyScreenChanged(_screen, _roi);
                         return;
                     }
+                case (WindowMessage)MyWin32.WM_HOTKEY:
+                    {
+                        if ((int)m.WParam == MyWin32.HOTKEY_ID_ESC)
+                        {
+                            // 只在绘 ROI 过程中退出；若想 Active 也退出可删掉 if
+                            if (_state == InitState.InitDraw || _state == InitState.Preview)
+                            {
+                                Dispose();   // 会同步关闭遮罩 + PostQuitMessage
+                                return;
+                            }
+                        }
+                        break;   // 让其余热键继续走 base.WndProc
+                    }
 
             }
             base.WndProc(ref m);
         }
+        private static void DrawRubber(Rectangle rc)
+        {
+            if (rc.IsEmpty) return;
+
+            // 防止 GDI 抛异常
+            if (rc.Width == 0) rc.Width = 1;
+            if (rc.Height == 0) rc.Height = 1;
+
+            // XOR 可逆框 – “先画新 → 再擦旧” 的逻辑在调用方保证
+            ControlPaint.DrawReversibleFrame(rc, Color.CornflowerBlue, FrameStyle.Dashed);
+        }
+        /// <summary>
+        /// 把当前 _roiPreview 渲染成“半透明黑 + 透明洞 + 蓝框”并推送到遮罩窗口。
+        /// 仅在鼠标抬起时调用一次。
+        /// </summary>
+        private void RenderMaskWithRoi()
+        {
+            int w = _screen.Width, h = _screen.Height;
+            Rectangle roi = NormalizeAndClamp(_roiPreview, w, h);
+
+            using var bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+            using var g = Graphics.FromImage(bmp);
+
+            g.CompositingMode = CompositingMode.SourceCopy;
+            g.FillRectangle(_brushDim, 0, 0, w, h);          // 半透明黑
+            g.FillRectangle(Brushes.Transparent, roi);       // 透明洞
+            g.CompositingMode = CompositingMode.SourceOver;
+            g.DrawRectangle(_penBlue, roi);                  // 蓝框
+
+            PushBitmap(bmp);    // ← 你已有的工具函数，内部做 GetHbitmap + ULW
+        }
+
+
         Rectangle inner;
         /// <summary>
         /// 在 Preview 阶段，根据鼠标点判定 Move / Resize 方向（HT 常量）。
@@ -398,68 +495,83 @@ namespace small_window2
 
         // 预览阶段：半透明黑 + 透明 ROI 洞 + 蓝色预览边框
         //显示预览边框；
-        
+        // ---- 类字段区，再加一个句柄保存“当前帧的位图” ----
+        private IntPtr _hBmpCurrent = IntPtr.Zero;
+
         private void UpdateLayered_Preview()
         {
-            int w = _screen.Width;
-            int h = _screen.Height;
+            int w = _screen.Width, h = _screen.Height;
 
-            // ① 先在内存位图上完成所有绘制
-            using var bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
-            using var g = Graphics.FromImage(bmp);
+            /* ---------- 用 _gfxPreview 画半透明黑 + 挖洞 + 蓝框 ---------- */
+            Rectangle roi = NormalizeAndClamp(_roiPreview, w, h);
+            DrawPreviewToCachedBitmap(roi, w, h);
 
-            // (a) 清背景
-            g.Clear(Color.Transparent);
+            /* ---------- 生成新的 HBITMAP 并选进 DC ---------- */
+            IntPtr hBmpNew = _bmpPreview.GetHbitmap(Color.FromArgb(0));
+            IntPtr hOld = MyWin32.SelectObject(_hdcMem, hBmpNew);  // ← hOld = 上一帧
 
-            // (b) 半透明黑遮罩 (SourceCopy：完全覆盖)
-            g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
-            using var dimBrush = new SolidBrush(Color.FromArgb(ALPHA_DIM, Color.Black));
-            g.FillRectangle(dimBrush, 0, 0, w, h);
-
-            // (c) 挖 ROI 洞
-            g.FillRectangle(Brushes.Transparent, _roiPreview);
-
-            // (d) 画蓝色预览框 (SourceOver)
-            g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceOver;
-            using var pen = new Pen(Color.CornflowerBlue, PREVIEW_BORDER);
-            g.DrawRectangle(pen, _roiPreview);
-
-            // ② 将位图推送到分层窗口
-            IntPtr hScreen = GetDC(IntPtr.Zero);
-            IntPtr hMem = CreateCompatibleDC(hScreen);
-            IntPtr hBmp = bmp.GetHbitmap(Color.FromArgb(0));   // 0 = 透明背景
-            IntPtr hOld = SelectObject(hMem, hBmp);
-
-            var size = new SIZE(w, h);
-            var srcPt = new POINT(0, 0);
-            var topPt = new POINT(0, 0);
-            var blend = new BLENDFUNCTION
+            /* ---------- 推送到分层窗口 ---------- */
+            var size = new MyWin32.SIZE(w, h);
+            var srcPt = new MyWin32.POINT(0, 0);
+            var topPt = new MyWin32.POINT(0, 0);
+            var blend = new MyWin32.BLENDFUNCTION
             {
-                BlendOp = AC_SRC_OVER,
+                BlendOp = MyWin32.AC_SRC_OVER,
                 SourceConstantAlpha = 255,
-                AlphaFormat = AC_SRC_ALPHA
+                AlphaFormat = MyWin32.AC_SRC_ALPHA
             };
+            MyWin32.UpdateLayeredWindow(
+                Handle, _hdcScreen, ref topPt, ref size,
+                _hdcMem, ref srcPt, 0, ref blend, MyWin32.ULW_ALPHA);
 
-            UpdateLayeredWindow(
-                Handle,                     // 分层窗口句柄
-                hScreen,                    // 屏幕 DC
-                ref topPt,                  // 目标位置 (全屏 0,0)
-                ref size,                   // 窗口大小
-                hMem,                       // 内存 DC
-                ref srcPt,                  // 源坐标
-                0,                          // 颜色键 (不用)
-                ref blend,
-                ULW_ALPHA);
+            /* ---------- 现在可以安全删上一帧位图 ---------- */
+            if (_hBmpCurrent != IntPtr.Zero)
+                MyWin32.DeleteObject(_hBmpCurrent);   // 上一帧已被替换、未选入 DC
 
-            // ③ 释放 GDI 资源
-            SelectObject(hMem, hOld);
-            DeleteObject(hBmp);
-            DeleteDC(hMem);
-            ReleaseDC(IntPtr.Zero, hScreen);
+            _hBmpCurrent = hBmpNew;                   // 本帧变成“上一帧”
+        }
+        #region 绘制  
+        /// <summary>
+        /// 把拖拽中得到的 ROI 规范化，并裁剪到屏幕内：
+        ///   1. 保证 Left ≤ Right, Top ≤ Bottom
+        ///   2. 保证 X ≥ 0, Y ≥ 0
+        ///   3. 让 X+W ≤ screenW, Y+H ≤ screenH
+        ///   4. 最终宽高至少为 1
+        /// </summary>
+        private static Rectangle NormalizeAndClamp(Rectangle src, int screenW, int screenH)
+        {
+            // 1) 先把左/上/宽/高转成四边
+            int L = Math.Min(src.Left, src.Right);
+            int R = Math.Max(src.Left, src.Right);
+            int T = Math.Min(src.Top, src.Bottom);
+            int B = Math.Max(src.Top, src.Bottom);
+
+            // 2) 裁剪到屏幕
+            L = Math.Max(0, L);
+            T = Math.Max(0, T);
+            R = Math.Min(screenW, R);
+            B = Math.Min(screenH, B);
+
+            // 3) 至少 1×1
+            if (R == L) R++;
+            if (B == T) B++;
+
+            return Rectangle.FromLTRB(L, T, R, B);
+        }
+        /// <summary>
+        /// 把当前 roi 绘制到复用位图 _bmpPreview 上：
+        ///   1) 整屏半透明黑   2) 在 roi 挖洞   3) 画蓝框
+        /// </summary>
+        private void DrawPreviewToCachedBitmap(Rectangle roi, int w, int h)
+        {
+            _gfxPreview.CompositingMode = CompositingMode.SourceCopy;
+            _gfxPreview.FillRectangle(_brushDim, 0, 0, w, h);
+            _gfxPreview.FillRectangle(Brushes.Transparent, roi);
+
+            _gfxPreview.CompositingMode = CompositingMode.SourceOver;
+            _gfxPreview.DrawRectangle(_penBlue, roi);
         }
 
-        #region 绘制  
-        
         private void UpdateLayered()
         {
             using var bmp = new Bitmap(_screen.Width, _screen.Height,
@@ -507,86 +619,15 @@ namespace small_window2
         public void Dispose()
         {
 
+
+            MyWin32.UnregisterHotKey(Handle, MyWin32.HOTKEY_ID_ESC);
             DestroyWindow(Handle);
             MyWin32.PostQuitMessage(0);         // 直接告诉消息泵退出
         }
 
+
+
     }
 
-    internal sealed class PreviewBorderWindow : NativeWindow, IDisposable
-    {
-        private const int BORDER = 2;  // 蓝框宽度
-        private readonly int _thickness;
-        private readonly IntPtr _screenDC;
-        private readonly IntPtr _memDC;
-        private readonly Bitmap _bmp;
-        private readonly IntPtr _hBmp;
-        private readonly IntPtr _hOld;
-
-        public PreviewBorderWindow(Rectangle roi, int thickness = 2)
-        {
-            _thickness = thickness;
-            _screenDC = MyWin32.GetDC(IntPtr.Zero);
-            _memDC = MyWin32.CreateCompatibleDC(_screenDC);
-
-            _bmp = DrawBorderBitmap(roi.Width, roi.Height);
-            _hBmp = _bmp.GetHbitmap(Color.FromArgb(0));
-            _hOld = MyWin32.SelectObject(_memDC, _hBmp);
-
-            IntPtr hWnd = MyWin32.CreateWindowEx(
-                MyWin32.WS_EX_LAYERED | MyWin32.WS_EX_TOPMOST | MyWin32.WS_EX_TOOLWINDOW,
-                "STATIC", null, MyWin32.WS_POPUP,
-                roi.X, roi.Y, roi.Width, roi.Height,
-                IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
-
-            AssignHandle(hWnd);
-            PushBitmap(roi.Location);
-
-            // 透明点击：不拦截鼠标
-            MyWin32.SetWindowLongPtr(Handle, MyWin32.WindowLongFlags.GWL_EXSTYLE,
-                (IntPtr)(MyWin32.WS_EX_LAYERED | MyWin32.WS_EX_TOPMOST |
-                         MyWin32.WS_EX_TOOLWINDOW | MyWin32.WS_EX_TRANSPARENT));
-        }
-
-        private Bitmap DrawBorderBitmap(int w, int h)
-        {
-            var bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
-            using var g = Graphics.FromImage(bmp);
-            g.Clear(Color.Transparent);
-            using var pen = new Pen(Color.CornflowerBlue, _thickness);
-            g.DrawRectangle(pen, 0, 0, w - 1, h - 1);
-            return bmp;
-        }
-
-        private void PushBitmap(Point topLeft)
-        {
-            var size = new MyWin32.SIZE(_bmp.Width, _bmp.Height);
-            var srcPt = new MyWin32.POINT(0, 0);
-            var dstPt = new MyWin32.POINT(topLeft.X, topLeft.Y);
-            var blend = new MyWin32.BLENDFUNCTION
-            { BlendOp = MyWin32.AC_SRC_OVER, SourceConstantAlpha = 255, AlphaFormat = MyWin32.AC_SRC_ALPHA };
-
-            MyWin32.UpdateLayeredWindow(Handle, _screenDC, ref dstPt,
-                ref size, _memDC, ref srcPt, 0, ref blend, MyWin32.ULW_ALPHA);
-        }
-
-        public void UpdateRect(Rectangle roi)
-        {
-            // 只移动/缩放窗口，不重绘位图
-            MyWin32.SetWindowPos(Handle, IntPtr.Zero,
-                roi.X, roi.Y, roi.Width, roi.Height,
-                MyWin32.SWP_NOZORDER | MyWin32.SWP_NOACTIVATE);
-        }
-
-        public void Dispose()
-        {
-            if (Handle != IntPtr.Zero) MyWin32.DestroyWindow(Handle);
-            MyWin32.SelectObject(_memDC, _hOld);
-            MyWin32.DeleteObject(_hBmp);
-            MyWin32.DeleteDC(_memDC);
-            MyWin32.ReleaseDC(IntPtr.Zero, _screenDC);
-            _bmp.Dispose();
-        }
-    }
 
 }

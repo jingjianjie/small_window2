@@ -83,7 +83,18 @@ namespace small_window2
         internal static extern bool SetWindowPos(
             IntPtr hWnd, IntPtr hWndInsertAfter,
             int X, int Y, int cx, int cy, uint uFlags);
+        //按键
+        internal const int VK_ESCAPE = 0x1B;
+        internal const int MOD_NONE = 0;          // RegisterHotKey 无修饰
+        internal const int HOTKEY_ID_ESC = 1;      // 随便取，只要全程唯一即可
 
+        internal const int WM_HOTKEY = 0x0312;
+
+        [DllImport("user32.dll", SetLastError = true)]
+        internal static extern bool RegisterHotKey(IntPtr hWnd, int id, int fsModifiers, int vk);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        internal static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
         // ---------- 鼠标相关 ----------
         internal const int HTCLIENT = 1;

@@ -39,7 +39,7 @@ namespace small_window2
 
         private MaskWindow _mask;
         private Rectangle _roi;
-
+        uint dbl = MyWin32.GetDoubleClickTime();
         private bool _dragging;
         private Point _dragStart;                // 鼠标相对 ROI 左上
         private long _lastClickTime = 0;
@@ -144,7 +144,7 @@ namespace small_window2
         }
 
         #region 消息处理
-
+        Point cur = new Point(0, 0);
         protected override void WndProc(ref Message m)
         {
             switch ((WindowMessage)m.Msg)
@@ -186,7 +186,7 @@ namespace small_window2
                     {
                         if (_htActive == HTNOWHERE) break;          // 没在拖
 
-                        Point cur = LParamToScreen(Handle, (WindowMessage)m.Msg, m.LParam);
+                        cur = LParamToScreen(Handle, (WindowMessage)m.Msg, m.LParam);
                         int dx = cur.X - _ptStart.X;
                         int dy = cur.Y - _ptStart.Y;
 
@@ -254,19 +254,19 @@ namespace small_window2
 
                         // —— 点击计数（只在 MouseUp 时统计）——
                         long now = Environment.TickCount64;
-                        uint dbl = MyWin32.GetDoubleClickTime();
 
-                        Point pt = LParamToScreen(Handle, (WindowMessage)m.Msg, m.LParam);
+
+                        cur = LParamToScreen(Handle, (WindowMessage)m.Msg, m.LParam);
                         bool closeCandidate =
                             (now - _lastClickTime <= dbl) &&                   // 时间间隔
-                            Math.Abs(pt.X - _lastClickPos.X) <= CLICK_SLOP &&  // 位移很小
-                            Math.Abs(pt.Y - _lastClickPos.Y) <= CLICK_SLOP;
+                            Math.Abs(cur.X - _lastClickPos.X) <= CLICK_SLOP &&  // 位移很小
+                            Math.Abs(cur.Y - _lastClickPos.Y) <= CLICK_SLOP;
 
                         _clickCount = closeCandidate ? _clickCount + 1 : 1;
                         _lastClickTime = now;
-                        _lastClickPos = pt;
+                        _lastClickPos = cur;
 
-                        if (_clickCount >= 3)
+                        if (_clickCount >= 2)
                         {
                             Dispose();                 // 关闭边框 + 遮罩
                             return;
