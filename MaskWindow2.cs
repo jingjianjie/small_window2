@@ -31,14 +31,10 @@ namespace small_window2
         private InitState _state = InitState.InitDraw;
 
         private readonly System.Windows.Forms.Timer _previewTimer = new() { Interval = 16 }; // 60 FPS
-        private bool _previewDirty; //预览时蓝框的“脏标”，ticker触发
+
 
         private Rectangle _rubberLast = Rectangle.Empty;
         private bool _rubberVisible;
-
-        // 用于绘制 / 擦除可逆框
-        //private Rectangle _rubberLast = Rectangle.Empty;
-        //private bool _rubberVisible;
 
         private Point _ptStart;       // InitDraw 拖拽起点
         private Rectangle _roiPreview;    // Preview 模式下临时 ROI
@@ -51,19 +47,10 @@ namespace small_window2
         private static readonly int PREVIEW_RESIZE_MARGIN = (int)(40 * GetDpiX()); // 判定“拖边/拖角”的宽度  
 
 
-
-        // === 一次性缓存 === 
-        private readonly Bitmap _bmpPreview;   // 全屏 32-bpp 位图
-        private readonly Graphics _gfxPreview;   // 绑定到 _bmpPreview
-        private readonly IntPtr _hdcScreen;    // 屏幕 DC
-        private readonly IntPtr _hdcMem;       // 内存 DC (SelectObject 到 _bmpPreview)
-        private readonly IntPtr _hBmp;         // GDI 句柄，选进 _hdcMem
-
         private readonly Brush _brushDim = new SolidBrush(Color.FromArgb(80, Color.Black));
         private readonly Pen _penBlue = new Pen(Color.CornflowerBlue, PREVIEW_BORDER);
 
 
-        // Add the following helper method to retrieve the DPI value:
         private static double GetDpiX()
         {
             using (var graphics = Graphics.FromHwnd(IntPtr.Zero))
@@ -71,7 +58,6 @@ namespace small_window2
                 return graphics.DpiX / 144.0;
             }
         }
-
 
         private byte _alphadim = 80;           // 遮罩透明度  
                                                      // MaskWindow ctor 里：先不给 WS_EX_TRANSPARENT
@@ -83,29 +69,12 @@ namespace small_window2
 
         public MaskWindow(RoiBorderWindow? border, Rectangle? initialRoi = null)
         {
-            _previewTimer.Start();
-
             //初始化 Preview GDI 缓存
             _screen = Screen.PrimaryScreen!.Bounds;
-
-            _bmpPreview = new Bitmap(_screen.Width, _screen.Height, PixelFormat.Format32bppArgb);
-            _gfxPreview = Graphics.FromImage(_bmpPreview);
-
-            _hdcScreen = MyWin32.GetDC(IntPtr.Zero);
-            _hdcMem = MyWin32.CreateCompatibleDC(_hdcScreen);
-            _hBmp = _bmpPreview.GetHbitmap(Color.FromArgb(0));   // α0=全透明
-            MyWin32.SelectObject(_hdcMem, _hBmp);
-            //
-
-
-            var s = GetDpiX();
             _borderWindow = border;                     // ★★
             _screen = Screen.PrimaryScreen!.Bounds;     // ★★
 
-
             _state = InitState.InitDraw;  // 初始状态：绘制 ROI
-
-
             // 初始无洞，先填满；真正的 _roi 由用户拖出
             _roi = Rectangle.Empty;
             IntPtr hWnd = CreateWindowEx(
@@ -126,6 +95,8 @@ namespace small_window2
         }
 
         public void Show() => ShowWindow(Handle, SW_SHOWNOACTIVATE);
+
+        /// <summary>更新遮罩：全屏半透明黑 + 无洞。</summary>
         private void UpdateLayered_FullDark()
         {
             _roiPreview = Rectangle.Empty;          // 无洞
@@ -134,12 +105,14 @@ namespace small_window2
             g.Clear(Color.FromArgb(_alphadim, Color.Black));
             PushBitmap(bmp);                        // 复用你的位图推送逻辑
         }
+
         /// <summary>被 RoiBorderWindow 调用，更新 ROI 并重绘遮罩。</summary>  
         public void UpdateRoi(Rectangle newRoi)
         {
             _roi = newRoi;
             UpdateLayered();
         }
+
         /// <summary>
         /// 把准备好的 32bpp 位图推送到分层窗口 (Handle)。
         /// </summary>
@@ -486,10 +459,6 @@ namespace small_window2
         }
 
 
-        // 预览阶段：半透明黑 + 透明 ROI 洞 + 蓝色预览边框
-        //显示预览边框；
-        // ---- 类字段区，再加一个句柄保存“当前帧的位图” ----
-        private IntPtr _hBmpCurrent = IntPtr.Zero;
 
 
         #region 绘制  

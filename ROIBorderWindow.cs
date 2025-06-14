@@ -28,13 +28,12 @@ namespace small_window2
         private Point _ptStart;              // 拖动开始的屏幕坐标
 
         private int _clickCount = 0;
-        private long _lastClick = 0;
 
         private MaskWindow _mask;
         private Rectangle _roi;
         uint dbl = MyWin32.GetDoubleClickTime();
-        private bool _dragging;
-        private Point _dragStart;                // 鼠标相对 ROI 左上
+
+
         private long _lastClickTime = 0;
         private Point _lastClickPos = Point.Empty;
         private const int CLICK_SLOP = 4;           // 容忍光标抖动 px
@@ -248,7 +247,7 @@ namespace small_window2
 
                         cur = LParamToScreen(Handle, (WindowMessage)m.Msg, m.LParam);
                         bool closeCandidate =
-                            (now - _lastClickTime <= dbl) &&                   // 时间间隔
+                            (now - _lastClickTime  <= (dbl+50)) &&                   // 时间间隔
                             Math.Abs(cur.X - _lastClickPos.X) <= CLICK_SLOP &&  // 位移很小
                             Math.Abs(cur.Y - _lastClickPos.Y) <= CLICK_SLOP;
 
@@ -268,7 +267,7 @@ namespace small_window2
 
             base.WndProc(ref m);
         }
-
+        Point pt = new Point(0, 0);
         private void HandleNcHitTest(ref Message m)
         {
             Point pt = LParamToScreen(Handle, (WindowMessage)m.Msg, m.LParam);
@@ -299,11 +298,6 @@ namespace small_window2
             bool onTop = dTop >= 0 && dTop < BORDER;
             bool onBottom = dBottom >= 0 && dBottom < BORDER;
 
-            //bool resizeLeft = onLeft && dLeft < RESIZE_MARGIN;
-            //bool resizeRight = onRight && dRight < RESIZE_MARGIN;
-            //bool resizeTop = onTop && dTop < RESIZE_MARGIN;
-            //bool resizeBottom = onBottom && dBottom < RESIZE_MARGIN;
-            
             //用于判断边框内外
             bool resizeLeft = onLeft && dLeft >= BORDER - RESIZE_MARGIN;
             bool resizeRight = onRight && dRight >= BORDER - RESIZE_MARGIN;

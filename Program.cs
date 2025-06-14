@@ -17,13 +17,8 @@ namespace small_window2
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
-
-            // Initialize the application configuration and create the overlay window
             ApplicationConfiguration.Initialize();
-            //using var ol = new OverlayWindow();
             var mask = new MaskWindow(null,null);
-            //using RoiBorderWindow border = new RoiBorderWindow(out MaskWindow mask);
-
             mask.Show();
 
             Application.Run();
