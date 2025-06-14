@@ -154,6 +154,20 @@ namespace small_window2
             Point cur;
             switch ((WindowMessage)m.Msg)
             {
+                // ───── 新增：InitDraw 阶段右键立即退出 ─────
+                case WindowMessage.WM_RBUTTONDOWN when _state == InitState.InitDraw:
+                case WindowMessage.WM_RBUTTONUP when _state == InitState.InitDraw:
+                    {
+                        // 若正捕获鼠标，先释放
+                        if (MyWin32.GetCapture() == Handle)
+                            MyWin32.ReleaseCapture();
+
+                        Dispose();          // 同步关闭遮罩 + PostQuitMessage
+                        return;             // 不再往下传
+                    }
+
+
+
                 // 让整块遮罩都算作 client-area，才能收到正常鼠标消息
                 case WindowMessage.WM_NCHITTEST:
                     cur = MyWin32.LParamToScreen(Handle, (WindowMessage)m.Msg, m.LParam);

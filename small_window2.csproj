@@ -13,5 +13,29 @@
   <ItemGroup>
     <Compile Remove="OverlayWindow.cs" />
   </ItemGroup>
+  
+  <PropertyGroup Condition="'$(Configuration)'=='Release'">
+    <!-- 发布目标运行时 -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+
+    <!-- ① 单文件、无自解压、独立运行时 -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <IncludeNativeLibrariesForSelfExtract>false</IncludeNativeLibrariesForSelfExtract>
+
+    <!-- ② Ready-to-Run + Composite -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <PublishReadyToRunComposite>true</PublishReadyToRunComposite>
+
+    <!-- ③ 静态 PGO（依赖 .mibc）-->
+    <!--<EnableProfileGuidedOptimization>true</EnableProfileGuidedOptimization>-->
+    <!-- 如果 .mibc 不在 publish 目录，可显式指定： -->
+    <!--<ProfileGuidedOptimizationDataFile>$(MSBuildProjectDirectory)\MyApp.mibc</ProfileGuidedOptimizationDataFile>-->
+
+
+
+    <!-- ⑤ 其它可选微调 -->
+    <!--<InvariantGlobalization>true</InvariantGlobalization>-->
+  </PropertyGroup>
 
 </Project>

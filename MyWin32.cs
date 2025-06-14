@@ -154,7 +154,9 @@ namespace small_window2
             /// 0x02E0 – 【每显示器 DPI 改变】(Win 8.1+)  
             /// HIWORD(wParam)=Y DPI，LOWORD(wParam)=X DPI；  
             /// lParam 指向系统建议的新窗口矩形（屏幕坐标）。
-            WM_DPICHANGED = 0x02E0
+            WM_DPICHANGED = 0x02E0,
+            WM_RBUTTONDOWN = 0x0204,
+            WM_RBUTTONUP = 0x0205,
 
         }
         [DllImport("user32.dll")] internal static extern uint GetDoubleClickTime();
@@ -269,7 +271,61 @@ namespace small_window2
             ClientToScreen(hWnd, ref pt);
             return new Point(pt.X, pt.Y);
         }
+        #region FindWindow
 
+        /// <summary>
+        /// 根据窗口类名和（可选的）窗口标题查找顶层窗口。
+        /// 任何参数可设 null 表示“任意匹配”。
+        /// </summary>
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        internal static extern IntPtr FindWindow(string? lpClassName, string? lpWindowName);
+
+        #endregion
+
+        #region SendMessageTimeout
+
+        internal const int WM_NULL = 0x0000;
+
+        /// <summary>
+        /// SendMessageTimeout flags (SMTO_*) for lpdwResult = SendMessageTimeout()
+        /// </summary>
+        internal const uint SMTO_NORMAL = 0x0000;
+        internal const uint SMTO_BLOCK = 0x0001;
+        internal const uint SMTO_ABORTIFHUNG = 0x0002;
+        internal const uint SMTO_NOTIMEOUTIFNOTHUNG = 0x0008;
+
+        /// <summary>
+        /// 向指定窗口发送消息，并在超时前等待回应。
+        /// 常用于探测窗口是否无响应（挂死）。
+        /// </summary>
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        internal static extern IntPtr SendMessageTimeout(
+            IntPtr hWnd,
+            uint Msg,
+            IntPtr wParam,
+            IntPtr lParam,
+            uint fuFlags,       // 取 SMTO_xxx 组合
+            uint uTimeout,      // 超时毫秒
+            out IntPtr lpdwResult // 返回值，可忽略
+        );
+        #region SetForegroundWindow / ShowWindow / IsIconic
+
+        /// <summary>
+        /// 将指定窗口设为前台并尝试恢复到正常显示状态（若最小化则还原）。
+        /// </summary>
+        [DllImport("user32.dll", SetLastError = true)]
+        internal static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        internal const int SW_RESTORE = 9;   // 如果最小化/最大化则还原
+        internal const int SW_SHOW = 5;   // 否则保持现状显示
+
+
+        [DllImport("user32.dll", SetLastError = true)]
+        internal static extern bool IsIconic(IntPtr hWnd);     // 判断窗口是否最小化
+
+        #endregion
+
+        #endregion
         internal static class Helpers
         {
             /// <summary>
