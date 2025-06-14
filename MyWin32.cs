@@ -235,10 +235,12 @@ namespace small_window2
         [DllImport("user32.dll")]
         internal static extern IntPtr GetCapture();
         // Win32.cs  (追加到文件任意位置都行)
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [DllImport("user32.dll")]
         internal static extern bool GetCursorPos(out POINT lpPoint);
 
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static Point GetCursorPos() { MyWin32.GetCursorPos(out var p); return new Point(p.X, p.Y); }
 
         [DllImport("user32.dll")]

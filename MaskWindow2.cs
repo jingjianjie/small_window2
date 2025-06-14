@@ -31,7 +31,10 @@ namespace small_window2
         private InitState _state = InitState.InitDraw;
 
         private readonly System.Windows.Forms.Timer _previewTimer = new() { Interval = 16 }; // 60 FPS
-
+                                                                                             // ---- Esc 双击判定 ----
+        private long _lastEscTime = 0;
+        private int _escClickCount = 0;
+        private static readonly uint ESC_DBL_TIME = MyWin32.GetDoubleClickTime(); // 系统双击时间
 
         private Rectangle _rubberLast = Rectangle.Empty;
         private bool _rubberVisible;
@@ -145,6 +148,7 @@ namespace small_window2
         }
         // ★★ 工具：根据当前屏幕生成居中的初始 ROI
         const int DRAG_THRESHOLD = 3;
+
         protected override void WndProc(ref Message m)
         {
             Point cur;
@@ -182,7 +186,8 @@ namespace small_window2
                         cur = MyWin32.LParamToScreen(Handle, (WindowMessage)m.Msg, m.LParam);
 
                         // 抹掉旧框
-                        if (_rubberVisible) { DrawRubber(_rubberLast); _rubberVisible = false; }
+                        if (_rubberVisible) {
+                            DrawRubber(_rubberLast); _rubberVisible = false; }
 
                         _roiPreview = Rectangle.FromLTRB(
                             Math.Min(_ptStart.X, cur.X),
@@ -352,21 +357,52 @@ namespace small_window2
                     }
                 case (WindowMessage)MyWin32.WM_HOTKEY:
                     {
-                        if ((int)m.WParam == MyWin32.HOTKEY_ID_ESC)
+                        if ((int)m.WParam != MyWin32.HOTKEY_ID_ESC)
+                            break;                                         // 不是 Esc 热键
+
+                        // ───────── 0) “未拖任何框” → 单击 Esc 即退 ─────────
+                        if (_state == InitState.InitDraw && _roiPreview.IsEmpty)
                         {
-                            // 只在绘 ROI 过程中退出；若想 Active 也退出可删掉 if
-                            if (_state == InitState.InitDraw || _state == InitState.Preview)
+                            Dispose();
+                            return;
+                        }
+
+                        // ───────── 1) 仅在 InitDraw / Preview 下处理双击退出 ─────────
+                        if (!(_state == InitState.InitDraw || _state == InitState.Preview))
+                            break;
+
+                        // 1. 获取鼠标屏幕坐标
+                        MyWin32.GetCursorPos(out var p);
+                         cur = new Point(p.X, p.Y);
+
+                        // 2. 鼠标必须在 ROI 外才计数
+                        if (!_roiPreview.Contains(cur))
+                        {
+                            long now = Environment.TickCount64;
+                            bool within = now - _lastEscTime <= ESC_DBL_TIME;
+
+                            _escClickCount = within ? _escClickCount + 1 : 1;
+                            _lastEscTime = now;
+
+                            if (_escClickCount >= 2)
                             {
-                                Dispose();   // 会同步关闭遮罩 + PostQuitMessage
+                                Dispose();          // 双击达成 → 退出
                                 return;
                             }
                         }
-                        break;   // 让其余热键继续走 base.WndProc
+                        else
+                        {
+                            _escClickCount = 0;     // 在框内按 Esc 不计数
+                        }
+
+                        break;                      // 继续其他消息
                     }
+
 
             }
             base.WndProc(ref m);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void DrawRubber(Rectangle rc)
         {
             if (rc.IsEmpty) return;
@@ -377,6 +413,7 @@ namespace small_window2
 
             // XOR 可逆框 – “先画新 → 再擦旧” 的逻辑在调用方保证
             ControlPaint.DrawReversibleFrame(rc, Color.CornflowerBlue, FrameStyle.Dashed);
+
         }
         /// <summary>
         /// 把当前 _roiPreview 渲染成“半透明黑 + 透明洞 + 蓝框”并推送到遮罩窗口。
