@@ -185,23 +185,115 @@ namespace small_window2
 
         [DllImport("user32.dll")] internal static extern bool DestroyWindow(IntPtr hWnd);
         [DllImport("user32.dll")] internal static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-
+        /// <summary>
+        /// Updates the position, size, shape, content, and translucency of a layered window
+        ///更新分层窗口的位置，大小，形状，内容和半透明
+        /// </summary>
+        /// <param name="hwnd"></param>
+        /// <param name="hdcDst"></param>
+        /// <param name="pptDst"></param>
+        /// <param name="psize"></param>
+        /// <param name="hdcSrc"></param>
+        /// <param name="pptSrc"></param>
+        /// <param name="crKey"></param>
+        /// <param name="pblend"></param>
+        /// <param name="dwFlags"></param>
+        /// <returns></returns>
         [DllImport("user32.dll")]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst,
             ref POINT pptDst, ref SIZE psize, IntPtr hdcSrc, ref POINT pptSrc,
             int crKey, ref BLENDFUNCTION pblend, int dwFlags);
 
-        [DllImport("user32.dll")] internal static extern IntPtr GetDC(IntPtr hWnd);
-        [DllImport("user32.dll")] internal static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+        /// <summary>
+        /// 获取指定窗口（或整个屏幕）的设备环境（HDC）。
+        /// </summary>
+        /// <param name="hWnd">
+        /// 窗口句柄。  
+        /// 传入 <see cref="IntPtr.Zero"/> 可取得整屏幕的 DC。
+        /// </param>
+        /// <returns>
+        /// 设备环境句柄 (HDC)。失败时返回 <see cref="IntPtr.Zero"/>。  
+        /// **必须**配合 <see cref="ReleaseDC"/> 释放。
+        /// </returns>
+        [DllImport("user32.dll")]
+        internal static extern IntPtr GetDC(IntPtr hWnd);
 
-        [DllImport("gdi32.dll")] internal static extern IntPtr CreateCompatibleDC(IntPtr hdc);
-        [DllImport("gdi32.dll")] internal static extern bool DeleteDC(IntPtr hdc);
-        [DllImport("gdi32.dll")] internal static extern IntPtr SelectObject(IntPtr hdc, IntPtr h);
-        [DllImport("gdi32.dll")] internal static extern bool DeleteObject(IntPtr ho);
+        /// <summary>
+        /// 释放通过 <see cref="GetDC"/> 获取的设备环境。
+        /// </summary>
+        /// <param name="hWnd">
+        /// 与 <see cref="GetDC"/> 调用时相同的窗口句柄。
+        /// </param>
+        /// <param name="hDC">要释放的设备环境句柄。</param>
+        /// <returns>
+        /// 成功返回 1；失败返回 0（可用 <c>Marshal.GetLastWin32Error()</c> 了解错误）。
+        /// </returns>
+        [DllImport("user32.dll")]
+        internal static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
 
-        [DllImport("user32.dll")] internal static extern void SetCapture(IntPtr hWnd);
-        [DllImport("user32.dll")] internal static extern bool ReleaseCapture();
+        /// <summary>
+        /// 将鼠标捕获设置到指定窗口，使其接收所有鼠标输入。
+        /// </summary>
+        /// <param name="hWnd">目标窗口句柄。</param>
+        /// <remarks>
+        /// 调用 <see cref="ReleaseCapture"/> 可取消捕获。
+        /// </remarks>
+        [DllImport("user32.dll")]
+        internal static extern void SetCapture(IntPtr hWnd);
+
+        /// <summary>
+        /// 释放鼠标捕获，让系统重新将鼠标输入按默认规则分发。
+        /// </summary>
+        /// <returns><c>true</c> 表示成功；失败返回 <c>false</c>。</returns>
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool ReleaseCapture();
+
+
+        /// <summary>
+        /// 创建与指定 HDC 兼容的内存 DC（Memory Device Context）。
+        /// </summary>
+        /// <param name="hdc">
+        /// 参考设备环境句柄。  
+        /// 传入 <see cref="IntPtr.Zero"/> 表示与当前屏幕兼容。
+        /// </param>
+        /// <returns>
+        /// 新建的内存 DC。使用完毕后应调用 <see cref="DeleteDC"/> 释放。
+        /// </returns>
+        [DllImport("gdi32.dll")]
+        internal static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+
+        /// <summary>
+        /// 删除（释放）内存 DC 及其选入的任何 GDI 对象。
+        /// </summary>
+        /// <param name="hdc">要删除的 DC 句柄。</param>
+        /// <returns><c>true</c> 表示删除成功；否则为 <c>false</c>。</returns>
+        [DllImport("gdi32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool DeleteDC(IntPtr hdc);
+
+        /// <summary>
+        /// 将 GDI 对象（位图、画笔、字体等）选入指定 DC，并返回原对象句柄。
+        /// </summary>
+        /// <param name="hdc">目标设备环境句柄。</param>
+        /// <param name="h">要选入的 GDI 对象句柄。</param>
+        /// <returns>
+        /// 之前在 DC 中的对象句柄。  
+        /// 结束绘制后应先用该返回值重新选回旧对象，再对新对象调用 <see cref="DeleteObject"/> 释放。
+        /// </returns>
+        [DllImport("gdi32.dll")]
+        internal static extern IntPtr SelectObject(IntPtr hdc, IntPtr h);
+
+        /// <summary>
+        /// 删除指定的 GDI 对象（位图、画笔、字体、区域等），回收 GDI 资源。
+        /// </summary>
+        /// <param name="ho">要删除的 GDI 对象句柄。</param>
+        /// <returns><c>true</c> 表示删除成功；否则为 <c>false</c>。</returns>
+        [DllImport("gdi32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool DeleteObject(IntPtr ho);
+
 
         // ---------- Helper ----------
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

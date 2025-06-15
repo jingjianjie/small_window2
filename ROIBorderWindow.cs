@@ -42,7 +42,7 @@ namespace small_window2
         {
             _mask = maskRef;
             _roi = roi;
-            // 其余初始化流程保持一致，但别再 new MaskWindow
+
             IntPtr hWnd = CreateWindowEx(
             WS_EX_MASK, "STATIC", null, WS_POPUP | WS_SIZEBOX,
             _roi.X - BORDER, _roi.Y - BORDER,
@@ -86,8 +86,19 @@ namespace small_window2
         public void Show() => ShowWindow(Handle, SW_SHOWNOACTIVATE);
 
         #region 绘制
+        /// <summary>
+        /// 绘制显式边框；
+        /// </summary>
         private void RedrawBorder()
         {
+            //HDC 是对屏幕、打印机、内存位图等抽象后的绘图上下文
+            /* 1) 取得 HDC                2) 选入或修改 GDI 对象       3) 调用绘图 API              4) 收尾释放
+        +---------------------+    +------------------------+    +-------------------------+    +-----------------+
+        | GetDC / BeginPaint  | -> | SelectObject(hPen)     | -> | MoveToEx / LineTo       | -> | DeleteObject     |
+        | CreateCompatibleDC  |    | SelectObject(hBitmap)  |    | BitBlt / AlphaBlend     |    | DeleteDC         |
+        | CreateDC(Printer)   |    | SetBkMode / SetROP2... |    | TextOut / Polygon / ... |    | ReleaseDC        |
+        +---------------------+    +------------------------+    +-------------------------+    +-----------------+
+            */
             int w = _roi.Width + BORDER * 2;
             int h = _roi.Height + BORDER * 2;
 
@@ -100,7 +111,7 @@ namespace small_window2
             g.FillRectangle(br, 0, 0, w, h);      // 先全填
             g.FillRectangle(Brushes.Transparent, BORDER, BORDER, _roi.Width, _roi.Height); // 中间挖空
 
-            IntPtr hScreen = GetDC(IntPtr.Zero);
+            IntPtr hScreen = GetDC(IntPtr.Zero); //DC：设备相关环境
             IntPtr hMem = CreateCompatibleDC(hScreen);
             IntPtr hBmp = bmp.GetHbitmap(Color.FromArgb(0));
             IntPtr hOld = SelectObject(hMem, hBmp);

@@ -341,6 +341,7 @@ namespace small_window2
                             return;         // 框内：忽略
 
                         // 框外：正式激活
+                        MyWin32.UnregisterHotKey(Handle, MyWin32.HOTKEY_ID_ESC);
                         ActivateRoi();
                         return;
                     }
@@ -369,7 +370,8 @@ namespace small_window2
                         _borderWindow?.NotifyScreenChanged(_screen, _roi);
                         return;
                     }
-                case (WindowMessage)MyWin32.WM_HOTKEY:
+                case (WindowMessage)MyWin32.WM_HOTKEY when _state == InitState.Preview:
+                case (WindowMessage)MyWin32.WM_HOTKEY when _state == InitState.InitDraw:
                     {
                         if ((int)m.WParam != MyWin32.HOTKEY_ID_ESC)
                             break;                                         // 不是 Esc 热键
@@ -416,6 +418,7 @@ namespace small_window2
             }
             base.WndProc(ref m);
         }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void DrawRubber(Rectangle rc)
         {
