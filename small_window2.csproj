@@ -8,7 +8,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Platforms>AnyCPU;x64</Platforms>
+    <EnablePerMonitorV2>true</EnablePerMonitorV2>
   </PropertyGroup>
+
 
   <ItemGroup>
     <Compile Remove="OverlayWindow.cs" />

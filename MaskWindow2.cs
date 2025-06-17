@@ -347,28 +347,45 @@ namespace small_window2
                         ActivateRoi();
                         return;
                     }
-
-
-
+                // ============ 分辨率 / DPI 变化 ============  
                 case WindowMessage.WM_DISPLAYCHANGE:
                 case WindowMessage.WM_DPICHANGED:
                     {
-                        // 1. 记录旧屏幕 & 新屏幕
-                        var oldScreen = _screen;
-                        _screen = Screen.PrimaryScreen!.Bounds;
+                        // a) 旧虚拟桌面，用于按比例映射 ROI  
+                        var oldVS = new Rectangle(_origin, _screen.Size);
 
-                        // 2. 把旧 ROI 按比例映射到新屏幕
-                        _roi = Helpers.ScaleRoi(_roi, oldScreen, _screen);
+                        // b) 取新的虚拟桌面  
+                        Rectangle vs = SystemInformation.VirtualScreen;        // 可能 Left/Top 为负  
+                        _origin = new Point(vs.Left, vs.Top);
+                        _screen = new Rectangle(0, 0, vs.Width, vs.Height);
 
-                        // 3. 调整遮罩窗口自身大小（全屏）
-                        MyWin32.SetWindowPos(Handle, IntPtr.Zero,
-                            0, 0, _screen.Width, _screen.Height,
-                            MyWin32.SWP_NOZORDER | MyWin32.SWP_NOACTIVATE);
+                        // c) 若是 DPI 消息，用系统给的建议矩形调整窗口  
+                        if ((WindowMessage)m.Msg == WindowMessage.WM_DPICHANGED)
+                        {
+                            var rc = Marshal.PtrToStructure<MyWin32.RECT>(m.LParam);
+                            MyWin32.SetWindowPos(Handle, IntPtr.Zero,
+                                rc.Left, rc.Top,
+                                rc.Right - rc.Left, rc.Bottom - rc.Top,
+                                MyWin32.SWP_NOZORDER | MyWin32.SWP_NOACTIVATE);
+                        }
+                        else // DISPLAYCHANGE：把窗口搬到新虚拟桌面左上角  
+                        {
+                            MyWin32.SetWindowPos(Handle, IntPtr.Zero,
+                                _origin.X, _origin.Y,
+                                _screen.Width, _screen.Height,
+                                MyWin32.SWP_NOZORDER | MyWin32.SWP_NOACTIVATE);
+                        }
 
-                        // 4. 重新绘制遮罩
-                        UpdateLayered();
+                        // d) 按比例把旧 ROI 投射到新坐标系（Helpers.ScaleRoi 是你已有的）  
+                        _roi = Helpers.ScaleRoi(_roi, oldVS, new Rectangle(_origin, _screen.Size));
 
-                        // 5. 通知边框窗口自适应
+                        // e) 重新绘制遮罩  
+                        if (_roi.IsEmpty)
+                            UpdateLayered_FullDark(); // 还在 InitDraw，没有 ROI——直接整屏暗  
+                        else
+                            UpdateLayered();          // Preview / Active——半透明黑 + 新 ROI 洞
+
+                        // f) 通知边框窗口同步  
                         _borderWindow?.NotifyScreenChanged(_screen, _roi);
                         return;
                     }

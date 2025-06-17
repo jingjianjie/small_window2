@@ -62,9 +62,11 @@ namespace small_window2
 
         public RoiBorderWindow(out MaskWindow mask)
         {
+            // ❶ 用虚拟桌面坐标系，居中生成默认 ROI（支持多屏 / 负坐标）
+            Rectangle vs = SystemInformation.VirtualScreen;
             _roi = new Rectangle(
-               (Screen.PrimaryScreen!.Bounds.Width - 800) / 2,
-               (Screen.PrimaryScreen.Bounds.Height - 400) / 2,
+               vs.Left+(vs.Width - 800) / 2,
+               vs.Top + (vs.Height - 400) / 2,
                800, 400);
             // 初始 ROI 矩形，位于屏幕中央，大小 800x400
             // 创建一个默认的 ROI 矩形
