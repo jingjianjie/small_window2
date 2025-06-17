@@ -27,6 +27,8 @@ namespace small_window2
         private Rectangle _roiStart;         // 拖动开始瞬间的 ROI
         private Point _ptStart;              // 拖动开始的屏幕坐标
 
+        
+
         private int _clickCount = 0;
 
         private MaskWindow _mask;

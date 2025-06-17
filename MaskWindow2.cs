@@ -65,24 +65,26 @@ namespace small_window2
         private byte _alphadim = 80;           // 遮罩透明度  
                                                      // MaskWindow ctor 里：先不给 WS_EX_TRANSPARENT
         const int WS_EX_MASK = WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW;
-
         private Rectangle _screen;
+        private Point _origin;          // ← 左上可能是负数
         private Rectangle _roi;                       // ROI 由外部窗口控制  
         private RoiBorderWindow? _borderWindow;
 
         public MaskWindow(RoiBorderWindow? border, Rectangle? initialRoi = null)
         {
             //初始化 Preview GDI 缓存
-            _screen = Screen.PrimaryScreen!.Bounds;
+            var vs = SystemInformation.VirtualScreen;
+            _screen = new Rectangle(0, 0, vs.Width, vs.Height);
+            _origin = new Point(vs.Left, vs.Top);   // 可能为负
             _borderWindow = border;                     // ★★
-            _screen = Screen.PrimaryScreen!.Bounds;     // ★★
+
 
             _state = InitState.InitDraw;  // 初始状态：绘制 ROI
-            // 初始无洞，先填满；真正的 _roi 由用户拖出
-            _roi = Rectangle.Empty;
+                                          // 初始无洞，先填满；真正的 _roi 由用户拖出
+                                          // ❷ 创建分层窗时用虚拟桌面左上角
             IntPtr hWnd = CreateWindowEx(
                 WS_EX_MASK, "STATIC", null, WS_POPUP,
-                0, 0, _screen.Width, _screen.Height,
+                _origin.X, _origin.Y, _screen.Width, _screen.Height,
                 IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
 
             if (hWnd == IntPtr.Zero)
@@ -129,7 +131,7 @@ namespace small_window2
 
             var size = new SIZE(bmp.Width, bmp.Height);
             var srcPt = new POINT(0, 0);
-            var topPt = new POINT(0, 0);
+            var topPt = new POINT(_origin.X, _origin.Y);
             var blend = new BLENDFUNCTION
             {
                 BlendOp = AC_SRC_OVER,
@@ -439,14 +441,18 @@ namespace small_window2
         private void RenderMaskWithRoi()
         {
             int w = _screen.Width, h = _screen.Height;
+            // ❹ 绘图前把 ROI 移到位图坐标系(0,0)
             Rectangle roi = NormalizeAndClamp(_roiPreview, w, h);
+            roi.Offset(-_origin.X, -_origin.Y);
 
             using var bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
             using var g = Graphics.FromImage(bmp);
 
             g.CompositingMode = CompositingMode.SourceCopy;
             g.FillRectangle(_brushDim, 0, 0, w, h);          // 半透明黑
-            g.FillRectangle(Brushes.Transparent, roi);       // 透明洞
+            var roiRel = _roi; 
+            roiRel.Offset(-_origin.X, -_origin.Y);
+            g.FillRectangle(Brushes.Transparent, roiRel);    // 在 ROI 位置挖洞
             g.CompositingMode = CompositingMode.SourceOver;
             g.DrawRectangle(_penBlue, roi);                  // 蓝框
 
