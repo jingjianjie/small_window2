@@ -441,18 +441,18 @@ namespace small_window2
         private void RenderMaskWithRoi()
         {
             int w = _screen.Width, h = _screen.Height;
-            // ❹ 绘图前把 ROI 移到位图坐标系(0,0)
-            Rectangle roi = NormalizeAndClamp(_roiPreview, w, h);
-            roi.Offset(-_origin.X, -_origin.Y);
+            Rectangle roi = _roiPreview;
+            roi.Offset(-_origin.X, -_origin.Y);               // 先平移
+            roi = NormalizeAndClamp(roi, w, h);               // 再裁剪 0-w/h
 
             using var bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
             using var g = Graphics.FromImage(bmp);
 
             g.CompositingMode = CompositingMode.SourceCopy;
             g.FillRectangle(_brushDim, 0, 0, w, h);          // 半透明黑
-            var roiRel = _roi; 
-            roiRel.Offset(-_origin.X, -_origin.Y);
-            g.FillRectangle(Brushes.Transparent, roiRel);    // 在 ROI 位置挖洞
+
+
+            g.FillRectangle(Brushes.Transparent, roi);       // ← 挖当前 ROI 洞
             g.CompositingMode = CompositingMode.SourceOver;
             g.DrawRectangle(_penBlue, roi);                  // 蓝框
 
@@ -562,8 +562,11 @@ namespace small_window2
             using var dimBrush = new SolidBrush(Color.FromArgb(_alphadim, Color.Black));
             g.FillRectangle(dimBrush, _screen);               // 整屏半透明黑  
 
-            g.FillRectangle(Brushes.Transparent, _roi);       // 在 ROI 位置挖洞  
-
+            var roiRel = _roi;            // 全局→位图
+            roiRel.Offset(-_origin.X, -_origin.Y);
+            roiRel = NormalizeAndClamp(roiRel, _screen.Width, _screen.Height);
+            g.FillRectangle(Brushes.Transparent, roiRel);
+   
             // 可选：画白色虚线框  
             g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceOver;
             using var pen = new Pen(Color.White, 1) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dot };
