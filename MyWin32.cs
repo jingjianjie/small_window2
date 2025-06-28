@@ -16,7 +16,7 @@ namespace small_window2
         internal const int WS_EX_TOPMOST = 0x00000008;
         internal const int WS_EX_NOACTIVATE = 0x08000000;
         internal const int WS_EX_TOOLWINDOW = 0x00000080;
-        internal const int WS_POPUP = unchecked((int)0x80000000);
+        internal const int WS_POPUP = unchecked((int)0x80000000);   
         // Win32.cs ── 加到 structs / 常量区下面就行
         internal const uint SWP_NOSIZE = 0x0001;
         internal const uint SWP_NOZORDER = 0x0004;
@@ -159,6 +159,8 @@ namespace small_window2
             WM_RBUTTONUP = 0x0205,
 
         }
+        [DllImport("user32.dll", ExactSpelling = true)]
+        internal static extern uint GetDpiForWindow(IntPtr hWnd);
         [DllImport("user32.dll")] internal static extern uint GetDoubleClickTime();
         [DllImport("user32.dll")] internal static extern void PostQuitMessage(int nExitCode);
         // ---------- structs ----------

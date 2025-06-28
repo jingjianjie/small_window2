@@ -62,7 +62,7 @@ namespace small_window2
             }
         }
 
-        private byte _alphadim = 80;           // 遮罩透明度  
+        private byte _alphadim = MainContext.Alpha;           // 遮罩透明度  
                                                      // MaskWindow ctor 里：先不给 WS_EX_TRANSPARENT
         const int WS_EX_MASK = WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW;
         private Rectangle _screen;
@@ -73,7 +73,7 @@ namespace small_window2
         public MaskWindow(RoiBorderWindow? border, Rectangle? initialRoi = null)
         {
             //初始化 Preview GDI 缓存
-            var vs = SystemInformation.VirtualScreen;
+            var vs = SystemInformation.VirtualScreen; //多屏幕完全遮罩优化
             _screen = new Rectangle(0, 0, vs.Width, vs.Height);
             _origin = new Point(vs.Left, vs.Top);   // 可能为负
             _borderWindow = border;                     // ★★
@@ -107,7 +107,7 @@ namespace small_window2
             _roiPreview = Rectangle.Empty;          // 无洞
             using var bmp = new Bitmap(_screen.Width, _screen.Height, PixelFormat.Format32bppArgb);
             using var g = Graphics.FromImage(bmp);
-            g.Clear(Color.FromArgb(_alphadim, Color.Black));
+            g.Clear(Color.FromArgb(80, Color.Black));
             PushBitmap(bmp);                        // 复用你的位图推送逻辑
         }
 
@@ -124,11 +124,14 @@ namespace small_window2
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void PushBitmap(Bitmap bmp)
         {
+            // 1.将 bmp 写入和屏幕内存对应的草稿区(DC)
+            //  创建草稿
             IntPtr hScreen = GetDC(IntPtr.Zero);
-            IntPtr hMem = CreateCompatibleDC(hScreen);
+            IntPtr hMem = CreateCompatibleDC(hScreen); //memory device context；创建与对应指针兼容的临时 DC 内存
+            //  BMP 作为 GDI 对象移入草稿
             IntPtr hBmp = bmp.GetHbitmap(Color.FromArgb(0));
-            IntPtr hOld = SelectObject(hMem, hBmp);
-
+            IntPtr hOld = SelectObject(hMem, hBmp); // 选中位图到内存 DC
+            // 2. 位运算混合入屏幕区内存；
             var size = new SIZE(bmp.Width, bmp.Height);
             var srcPt = new POINT(0, 0);
             var topPt = new POINT(_origin.X, _origin.Y);
@@ -138,19 +141,71 @@ namespace small_window2
                 SourceConstantAlpha = 255,
                 AlphaFormat = AC_SRC_ALPHA
             };
-
+            // 以 DC 为基本单位做位运算；
             UpdateLayeredWindow(Handle, hScreen, ref topPt,
                                 ref size, hMem, ref srcPt,
-                                0, ref blend, ULW_ALPHA);
-
-            SelectObject(hMem, hOld);
+                                0, ref blend, ULW_ALPHA);  //实际绘制，UpdateLayeredWindow 需要 hMem 中已经选中了正确的位图，这样才能读取位图数据进行分层窗口渲染。
+            
+            // 3. 释放 DC 区
+            // 先释放 hbmp 后删除
+            SelectObject(hMem, hOld); //select & activate GDI
+ 
             DeleteObject(hBmp);
+            // 再删除 DC；
             DeleteDC(hMem);
             ReleaseDC(IntPtr.Zero, hScreen);
         }
         // ★★ 工具：根据当前屏幕生成居中的初始 ROI
         const int DRAG_THRESHOLD = 3;
+//        1. 初始状态 - 创建内存DC
+//┌─────────────────┐    ┌─────────────────┐
+//│   屏幕 DC       │    │   内存 DC       │
+//│  (用户可见)     │    │  (用户不可见)   │
+//│                 │    │                 │
+//│  ┌───────────┐  │    │  ┌───────────┐  │
+//│  │           │  │    │  │           │  │
+//│  │   空白    │  │    │  │   空白    │  │
+//│  │           │  │    │  │           │  │
+//│  └───────────┘  │    │  └───────────┘  │
+//└─────────────────┘    └─────────────────┘
+//      hScreen hMem
+//2. 绘图阶段 - 所有操作都在内存中
+//时间轴: T1 → T2 → T3 → T4
 
+//T1: Rectangle()
+//┌─────────────────┐    ┌─────────────────┐
+//│   屏幕 DC       │    │   内存 DC       │
+//│                 │    │                 │
+//│  ┌───────────┐  │    │  ┌───────────┐  │
+//│  │           │  │    │  │ ┌─────┐   │  │
+//│  │   空白    │  │    │  │ │█████│   │  │ ← 绘制矩形
+//│  │           │  │    │  │ └─────┘   │  │
+//│  └───────────┘  │    │  └───────────┘  │
+//└─────────────────┘    └─────────────────┘
+
+//T2: Ellipse()  
+//┌─────────────────┐    ┌─────────────────┐
+//│   屏幕 DC       │    │   内存 DC       │
+//│                 │    │                 │
+//│  ┌───────────┐  │    │  ┌───────────┐  │
+//│  │           │  │    │  │ ┌─────┐   │  │
+//│  │   空白    │  │    │  │ │█████│ ◯ │  │ ← 增加圆形
+//│  │           │  │    │  │ └─────┘   │  │
+//│  └───────────┘  │    │  └───────────┘  │
+//└─────────────────┘    └─────────────────┘
+
+//T3: TextOut()
+//┌─────────────────┐    ┌─────────────────┐
+//│   屏幕 DC       │    │   内存 DC       │
+//│                 │    │                 │
+//│  ┌───────────┐  │    │  ┌───────────┐  │
+//│  │           │  │    │  │ ┌─────┐   │  │
+//│  │   空白    │  │    │  │ │█████│ ◯ │  │
+//│  │           │  │    │  │ └─────┘   │  │
+//│  └───────────┘  │    │  │   ABC     │  │ ← 增加文字
+//└─────────────────┘    └───┴───────────┴──┘
+
+//用户全程看到: 空白屏幕 (无闪烁！)
         protected override void WndProc(ref Message m)
         {
             Point cur;
@@ -167,8 +222,6 @@ namespace small_window2
                         Dispose();          // 同步关闭遮罩 + PostQuitMessage
                         return;             // 不再往下传
                     }
-
-
 
                 // 让整块遮罩都算作 client-area，才能收到正常鼠标消息
                 case WindowMessage.WM_NCHITTEST:
@@ -332,6 +385,9 @@ namespace small_window2
                 case WindowMessage.WM_NCLBUTTONDBLCLK when _state == InitState.Preview:  // 非客户区双击
                 case WindowMessage.WM_LBUTTONDBLCLK when _state == InitState.Preview: // 客户区双击
                     {
+               
+       
+
                         // 如果蓝框太小 (<50×50) 则无效，避免误触
                         if (_roiPreview.Width < 50 || _roiPreview.Height < 50)
                             return;
@@ -344,7 +400,11 @@ namespace small_window2
 
                         // 框外：正式激活
                         MyWin32.UnregisterHotKey(Handle, MyWin32.HOTKEY_ID_ESC);
+
                         ActivateRoi();
+                        
+                        
+                        
                         return;
                     }
                 // ============ 分辨率 / DPI 变化 ============  
@@ -520,6 +580,7 @@ namespace small_window2
             _state = InitState.Active;
             _roi = _roiPreview;          // 固定 ROI
 
+
             // 1) 添加 WS_EX_TRANSPARENT，使整片遮罩可穿透
             const int ADD_EXSTYLE = WS_EX_TRANSPARENT;
             int ex = (int)MyWin32.GetWindowLongPtr(Handle, MyWin32.WindowLongFlags.GWL_EXSTYLE);
@@ -567,6 +628,7 @@ namespace small_window2
             return Rectangle.FromLTRB(L, T, R, B);
         }
 
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Interoperability", "CA1416:验证平台兼容性", Justification = "<挂起>")]
         private void UpdateLayered()
         {
             using var bmp = new Bitmap(_screen.Width, _screen.Height,
@@ -623,8 +685,8 @@ namespace small_window2
         }
         public void Dispose()
         {
-
-
+            MainContext.Alpha = _alphadim; // 保存当前遮罩透明度
+            MainContext.Save();
             MyWin32.UnregisterHotKey(Handle, MyWin32.HOTKEY_ID_ESC);
             DestroyWindow(Handle);
             MyWin32.PostQuitMessage(0);         // 直接告诉消息泵退出

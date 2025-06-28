@@ -22,6 +22,7 @@ static class Program
             owns = true;
         }
 
+        //防止多开
         if (!owns)
         {
             // ① 未获 -> Ping 主窗口
@@ -68,9 +69,11 @@ static class Program
         // ① 多核 JIT 预热
         ProfileOptimization.SetProfileRoot(AppContext.BaseDirectory);
         ProfileOptimization.StartProfile("winforms.jitprofile");
+
         // ---- 单实例正式启动 ----
         ApplicationConfiguration.Initialize();
         var mask = new MaskWindow(null, null);
+        
         mask.Show();
         Application.Run();
     }

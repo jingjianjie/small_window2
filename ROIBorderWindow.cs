@@ -1,4 +1,5 @@
 ﻿
+using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 
 
@@ -11,7 +12,9 @@ namespace small_window2
     {
         private bool _disposed;
 
-
+        private double _dpiScale = 1.0;
+        private void RefreshDpi() =>
+               _dpiScale = MyWin32.GetDpiForWindow(Handle) / 96.0;
         // ────────────────────────────────────────────────
         // 边框命中测试：外环 ≈3px → Resize；内环(剩余) → Move
         // ────────────────────────────────────────────────
@@ -53,40 +56,17 @@ namespace small_window2
 
             if (hWnd == IntPtr.Zero)
                 throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-
-            AssignHandle(hWnd);
-            RedrawBorder();
-
-        }
-
-
-        public RoiBorderWindow(out MaskWindow mask)
-        {
-            // ❶ 用虚拟桌面坐标系，居中生成默认 ROI（支持多屏 / 负坐标）
-            Rectangle vs = SystemInformation.VirtualScreen;
-            _roi = new Rectangle(
-               vs.Left+(vs.Width - 800) / 2,
-               vs.Top + (vs.Height - 400) / 2,
-               800, 400);
-            // 初始 ROI 矩形，位于屏幕中央，大小 800x400
-            // 创建一个默认的 ROI 矩形
-            IntPtr hWnd = CreateWindowEx(
-                WS_EX_MASK, "STATIC", null, WS_POPUP | WS_SIZEBOX,
+            AssignHandle(hWnd);           // **必须先把句柄绑定给 NativeWindow**
+            RefreshDpi();                 // 现在 _dpiScale 正确
+                                          // 直接用物理像素定位首帧
+            MyWin32.SetWindowPos(Handle, IntPtr.Zero,
                 _roi.X - BORDER, _roi.Y - BORDER,
                 _roi.Width + BORDER * 2, _roi.Height + BORDER * 2,
-                IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+                SWP_NOZORDER | SWP_NOACTIVATE);
+            RedrawBorder();               // 再绘位图
 
-            if (hWnd == IntPtr.Zero)
-                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
 
-            AssignHandle(hWnd);
-            RedrawBorder();
-
-            // ★★ 构造 MaskWindow，并把 this 传进去
-            mask = new MaskWindow(this, _roi);
-            _mask = mask;
         }
-        //
         public void Show() => ShowWindow(Handle, SW_SHOWNOACTIVATE);
 
         #region 绘制
@@ -95,34 +75,27 @@ namespace small_window2
         /// </summary>
         private void RedrawBorder()
         {
-            //HDC 是对屏幕、打印机、内存位图等抽象后的绘图上下文
-            /* 1) 取得 HDC                2) 选入或修改 GDI 对象       3) 调用绘图 API              4) 收尾释放
-        +---------------------+    +------------------------+    +-------------------------+    +-----------------+
-        | GetDC / BeginPaint  | -> | SelectObject(hPen)     | -> | MoveToEx / LineTo       | -> | DeleteObject     |
-        | CreateCompatibleDC  |    | SelectObject(hBitmap)  |    | BitBlt / AlphaBlend     |    | DeleteDC         |
-        | CreateDC(Printer)   |    | SetBkMode / SetROP2... |    | TextOut / Polygon / ... |    | ReleaseDC        |
-        +---------------------+    +------------------------+    +-------------------------+    +-----------------+
-            */
-            int w = _roi.Width + BORDER * 2;
-            int h = _roi.Height + BORDER * 2;
 
-            using var bmp = new Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+
+            int wPx = _roi.Width + BORDER * 2;   // 物理像素
+            int hPx = _roi.Height + BORDER * 2;
+            using var bmp = new Bitmap(wPx, hPx, PixelFormat.Format32bppArgb);
             using var g = Graphics.FromImage(bmp);
             g.Clear(Color.Transparent);
 
             g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
             using var br = new SolidBrush(Color.FromArgb(120, Color.White));  // 纯白边
-            g.FillRectangle(br, 0, 0, w, h);      // 先全填
-            g.FillRectangle(Brushes.Transparent, BORDER, BORDER, _roi.Width, _roi.Height); // 中间挖空
+            g.FillRectangle(br, 0, 0, wPx, hPx);      // 先全填
+            g.FillRectangle(Brushes.Transparent, BORDER, BORDER, _roi.Width, _roi.Height);// 中间挖空
 
             IntPtr hScreen = GetDC(IntPtr.Zero); //DC：设备相关环境
             IntPtr hMem = CreateCompatibleDC(hScreen);
             IntPtr hBmp = bmp.GetHbitmap(Color.FromArgb(0));
             IntPtr hOld = SelectObject(hMem, hBmp);
 
-            var size = new SIZE(w, h);
+            var size = new SIZE(wPx, hPx);
             var srcPt = new POINT(0, 0);
-            var top = new POINT(_roi.X - BORDER, _roi.Y - BORDER);
+            var top = new POINT(_roi.X - BORDER, _roi.Y - BORDER);   // 物理坐标
             var blend = new BLENDFUNCTION { BlendOp = AC_SRC_OVER, SourceConstantAlpha = 255, AlphaFormat = AC_SRC_ALPHA };
 
             UpdateLayeredWindow(Handle, hScreen, ref top, ref size,
@@ -140,11 +113,14 @@ namespace small_window2
         {
             _roi = newRoi;
 
-            // 重新摆放并重绘，注意加上边框宽度
-            SetWindowPos(Handle, IntPtr.Zero,
+            RefreshDpi();
+
+            
+            MyWin32.SetWindowPos(Handle, IntPtr.Zero,
                 _roi.X - BORDER, _roi.Y - BORDER,
-                _roi.Width + BORDER * 2, _roi.Height + BORDER * 2,
+                _roi.Width  + BORDER * 2, _roi.Height +   BORDER * 2,
                 SWP_NOZORDER | SWP_NOACTIVATE);
+
 
             RedrawBorder();          // 单次重绘边框位图
         }
@@ -181,6 +157,7 @@ namespace small_window2
                     {
                         _htActive = (int)m.WParam;                 // 记录方向(HTLEFT/HTRIGHT/HTTOP.../HTCAPTION)
                         _roiStart = _roi;                          // 记录初始 ROI，用于计算差值
+
                         _ptStart = LParamToScreen(Handle, (WindowMessage)m.Msg, m.LParam); // 记录起始屏幕坐标
                         SetCapture(Handle);                        // 抓取鼠标
                         return;                                    // 不继续给系统默认处理
@@ -248,16 +225,29 @@ namespace small_window2
                                 B = T + MIN_H;
                         }
 
+
                         Rectangle r = Rectangle.FromLTRB(L, T, R, B);
 
-                        // 4) 只移动/缩放窗口，不触发重绘
-                        SetWindowPos(Handle, IntPtr.Zero,
+                            MyWin32.SetWindowPos(Handle, IntPtr.Zero,
                             r.X - BORDER, r.Y - BORDER,
                             r.Width + BORDER * 2, r.Height + BORDER * 2,
                             SWP_NOZORDER | SWP_NOACTIVATE);
-
-                        _roi = r;          // 更新当前矩形供下次命中测试
+                                    _roi = r;                 // 再保存
                         return;
+                    }
+                case WindowMessage.WM_DPICHANGED:
+                    {
+                        var rc = Marshal.PtrToStructure<MyWin32.RECT>(m.LParam);
+
+                        MyWin32.SetWindowPos(Handle, IntPtr.Zero,
+                            rc.Left, rc.Top,
+                            rc.Right - rc.Left, rc.Bottom - rc.Top,
+                            SWP_NOZORDER | SWP_NOACTIVATE);
+
+                        RefreshDpi();           // 更新 _dpiScale 只是为了 MIN_W/H 判定
+                        RedrawBorder();         // 位图重新画（用物理像素宽高）
+                        return;
+               
                     }
 
                 // 4) 左键释放 —— 结束拖拽/统计点击次数
@@ -300,6 +290,7 @@ namespace small_window2
             base.WndProc(ref m);
 
         }
+
         // 允许在 ROI 下方额外捕捉拖拽的范围（像素）
         private const int EXTRA_BOTTOM_RANGE = 30; // ← 根据需求可调
         private void HandleNcHitTest(ref Message m)

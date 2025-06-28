@@ -2,13 +2,15 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net7.0-windows10.0.17763.0</TargetFramework>
+    <TargetFramework>net8.0-windows7.0</TargetFramework>
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Platforms>AnyCPU;x64</Platforms>
+    <EnableWindowsFormsHighDpiAutoResizing>true</EnableWindowsFormsHighDpiAutoResizing>
     <EnablePerMonitorV2>true</EnablePerMonitorV2>
+    
   </PropertyGroup>
 
 
@@ -25,19 +27,24 @@
     <SelfContained>false</SelfContained>
     <IncludeNativeLibrariesForSelfExtract>false</IncludeNativeLibrariesForSelfExtract>
 
+    <!-- ───── 去调试符号 / 去 PDB ───── --><EnablePerMonitorV2>true</EnablePerMonitorV2>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <StripSymbols>true</StripSymbols>
+
+    
     <!-- ② Ready-to-Run + Composite -->
     <PublishReadyToRun>true</PublishReadyToRun>
     <PublishReadyToRunComposite>true</PublishReadyToRunComposite>
 
-    <!-- ③ 静态 PGO（依赖 .mibc）-->
-    <!--<EnableProfileGuidedOptimization>true</EnableProfileGuidedOptimization>-->
-    <!-- 如果 .mibc 不在 publish 目录，可显式指定： -->
-    <!--<ProfileGuidedOptimizationDataFile>$(MSBuildProjectDirectory)\MyApp.mibc</ProfileGuidedOptimizationDataFile>-->
+    <!-- ───── 其他启动路径微调 ───── -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- 少加载一堆 ICU 数据 -->
+    <TieredCompilation>true</TieredCompilation>
+    <TieredCompilationQuickJit>true</TieredCompilationQuickJit>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
 
-
-
-    <!-- ⑤ 其它可选微调 -->
-    <!--<InvariantGlobalization>true</InvariantGlobalization>-->
+    
   </PropertyGroup>
 
 </Project>
